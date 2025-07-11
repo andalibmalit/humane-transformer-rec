@@ -78,7 +78,8 @@ def operations_callback(ops: defaultdict) -> None:
         inlined_text = record.text.replace('\n', ' ')
 
         # print all texts just as demo that data stream works
-        logger.debug(
+        # default - is debug lvl logging
+        logger.info(
             f'NEW POST '
             f'[CREATED_AT={record.created_at}]'
             f'[AUTHOR={author}]'
@@ -90,9 +91,13 @@ def operations_callback(ops: defaultdict) -> None:
         if should_ignore_post(created_post):
             continue
 
-        scores = classifier(record.text, wellbeing_labels)['scores']
+        result = classifier(record.text, candidate_labels=wellbeing_labels)
+        logger.info(f"Classification result: {result}")
+        scores = result['scores']
         wellbeing_avg = sum(scores) / len(scores)
         if wellbeing_avg >= 0.8:
+            logger.info(
+                f"RECORD TEXT: -- \"{record.text}\" -- has wellbeing average over 0.8")
             reply_root = reply_parent = None
             if record.reply:
                 reply_root = record.reply.root.uri
@@ -105,6 +110,9 @@ def operations_callback(ops: defaultdict) -> None:
                 'reply_root': reply_root,
             }
             posts_to_create.append(post_dict)
+        else:
+            logger.info(
+                f"RECORD TEXT: -- \"{record.text}\" -- has wellbeing average below 0.8")
 
         '''# only python-related posts
         if 'python' in record.text.lower():
