@@ -8,6 +8,24 @@ from server import config
 from server.logger import logger
 from server.database import db, Post
 
+from transformers import pipeline
+
+# zero-shot transformer classification pipeline for humane tech criteria (not yet using metrics)
+classifier = pipeline(
+    "zero-shot-classification",
+    model="MoritzLaurer/deberta-v3-large-zeroshot-v2.0"  # good for zero-shot
+    # model = "mental/mental-bert-base-uncased" # mental health domain
+    # model = "MoritzLaurer/deberta-v3-base-zeroshot-v1" # faster version
+    # model = "facebook/bart-large-mnli" # classical baseline for zero-shot
+)
+
+wellbeing_labels = [
+    "caring and supportive",
+    "mindful and present",
+    "fulfilling and meaningful",
+    "connecting and community-building"
+]
+
 
 def is_archive_post(record: 'models.AppBskyFeedPost.Record') -> bool:
     # Sometimes users will import old posts from Twitter/X which con flood a feed with
@@ -53,12 +71,15 @@ def operations_callback(ops: defaultdict) -> None:
         author = created_post['author']
         record = created_post['record']
 
-        post_with_images = isinstance(record.embed, models.AppBskyEmbedImages.Main)
-        post_with_video = isinstance(record.embed, models.AppBskyEmbedVideo.Main)
+        post_with_images = isinstance(
+            record.embed, models.AppBskyEmbedImages.Main)
+        post_with_video = isinstance(
+            record.embed, models.AppBskyEmbedVideo.Main)
         inlined_text = record.text.replace('\n', ' ')
 
         # print all texts just as demo that data stream works
-        logger.debug(
+        # default - is debug lvl logging
+        logger.info(
             f'NEW POST '
             f'[CREATED_AT={record.created_at}]'
             f'[AUTHOR={author}]'
@@ -70,8 +91,13 @@ def operations_callback(ops: defaultdict) -> None:
         if should_ignore_post(created_post):
             continue
 
-        # only python-related posts
-        if 'python' in record.text.lower():
+        result = classifier(record.text, candidate_labels=wellbeing_labels)
+        logger.info(f"Classification result: {result}")
+        scores = result['scores']
+        wellbeing_avg = sum(scores) / len(scores)
+        if wellbeing_avg >= 0.8:
+            logger.info(
+                f"RECORD TEXT: -- \"{record.text}\" -- has wellbeing average over 0.8")
             reply_root = reply_parent = None
             if record.reply:
                 reply_root = record.reply.root.uri
@@ -84,6 +110,24 @@ def operations_callback(ops: defaultdict) -> None:
                 'reply_root': reply_root,
             }
             posts_to_create.append(post_dict)
+        else:
+            logger.info(
+                f"RECORD TEXT: -- \"{record.text}\" -- has wellbeing average below 0.8")
+
+        '''# only python-related posts
+        if 'python' in record.text.lower():
+            reply_root = reply_parent = None
+            if record.reply:
+                reply_root = record.reply.root.uri
+                reply_parent = record.reply.parent.uri
+
+            post_dict = {
+                'uri': created_post['uri'],
+                'cid': created_post['cid'],
+                'reply_parent': reply_parent,
+                'reply_root': reply_root,
+            }
+            posts_to_create.append(post_dict)'''
 
     posts_to_delete = ops[models.ids.AppBskyFeedPost]['deleted']
     if posts_to_delete:
